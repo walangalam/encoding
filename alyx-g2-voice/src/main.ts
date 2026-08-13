@@ -1,200 +1,29 @@
-import {
-  AudioInputSource,
-  CreateStartUpPageContainer,
-  OsEventTypeList,
-  TextContainerProperty,
-  TextContainerUpgrade,
-  waitForEvenAppBridge,
-} from '@evenrealities/even_hub_sdk'
-
-const MAIN_ID = 1
-const MAIN_NAME = 'alyxvoice'
-const UI_THROTTLE_MS = 250
-const AUTO_FALLBACK_MS = 3000
+import {AudioInputSource,CreateStartUpPageContainer,OsEventTypeList,TextContainerProperty,TextContainerUpgrade,waitForEvenAppBridge} from '@evenrealities/even_hub_sdk'
 
 const bridge = await waitForEvenAppBridge()
+const ID=1, NAME='alyxvoice', URL='wss://ramurgamefix.com/alyx-g2-voice'
+let ws:WebSocket|null=null, mic=false, mode:'wake'|'ptt'='wake', state='CONNECTING', partial='', finalText='', reply='', wakeSeen=false, frames=0, lastDb=-96, lastVoice=0, press=0, lastRender=0
 
-type MicState = 'OFF' | 'STARTING' | 'LIVE' | 'FAILED'
-let micState: MicState = 'OFF'
-let shuttingDown = false
-let lastUiUpdate = 0
-let packetCount = 0
-let lastDb = -96
-let pressCount = 0
-let lastEvent = 'startup'
-let lastAction = 'Ready'
-let audioResult: 'n/a' | 'true' | 'false' | 'error' = 'n/a'
-let lastError = ''
+function evt(e?:{eventType?:OsEventTypeList}){return e ? (e.eventType ?? OsEventTypeList.CLICK_EVENT) : null}
+function db(p:Uint8Array){const n=p.byteLength-p.byteLength%2;if(n<2)return -96;const v=new DataView(p.buffer,p.byteOffset,n);let s=0;for(let i=0;i<n;i+=2){const x=v.getInt16(i,true)/32768;s+=x*x}const r=Math.sqrt(s/(n/2));return r>0?Math.max(-96,20*Math.log10(r)):-96}
+function text(){const body=reply||partial||finalText||'Say “Alyx…” or press temple';return ['ALYX VOICE 0.2.0',`NET:${ws?.readyState===1?'OK':'--'} MIC:${mic?'ON':'OFF'} ${mode.toUpperCase()}`,`STATE:${state}`,body.slice(-190),`frames:${frames} press:${press}`].join('\n')}
+async function render(){const now=performance.now();if(now-lastRender<140)return;lastRender=now;await bridge.textContainerUpgrade(new TextContainerUpgrade({containerID:ID,containerName:NAME,content:text()})).catch(()=>{})}
+function sendJson(o:unknown){if(ws?.readyState===1)ws.send(JSON.stringify(o))}
+function connect(){state='CONNECTING';ws=new WebSocket(URL);ws.binaryType='arraybuffer';ws.onopen=()=>{state='READY';sendJson({type:'hello',client:'g2',version:'0.2.0'});void startMic();void render()};ws.onmessage=e=>{if(typeof e.data!=='string')return;try{const m=JSON.parse(e.data);if(m.type==='partial'){partial=m.text||'';if(/\balyx\b/i.test(partial)){wakeSeen=true;state='WAKE HEARD'}}else if(m.type==='final'){finalText=m.text||'';partial='';state='THINKING'}else if(m.type==='reply'){reply=m.text||'';state='READY';wakeSeen=false;finalText=''}else if(m.type==='error'){reply=`ERROR: ${m.message}`;state='ERROR'}void render()}catch{}};ws.onclose=()=>{state='OFFLINE';void render();setTimeout(connect,2500)};ws.onerror=()=>{state='NET ERROR';void render()}}
+async function startMic(){if(mic)return;state='MIC START';void render();const ok=await bridge.audioControl(true,AudioInputSource.Glasses).catch(()=>false);mic=!!ok;state=mic?'LISTENING':'MIC FAILED';sendJson({type:'mode',mode});void render()}
+async function stopMic(){if(!mic)return;await bridge.audioControl(false).catch(()=>false);mic=false;void render()}
+function beginPtt(){mode='ptt';reply='';partial='';finalText='';wakeSeen=true;state='PTT LISTEN';sendJson({type:'start',mode:'ptt'});void render()}
+function endUtterance(){sendJson({type:'end'});state='TRANSCRIBING';void render()}
 
-function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
-  if (!envelope) return null
-  return envelope.eventType ?? OsEventTypeList.CLICK_EVENT
-}
+const startup=new TextContainerProperty({xPosition:0,yPosition:0,width:576,height:288,borderWidth:0,borderColor:5,paddingLength:6,containerID:ID,containerName:NAME,content:text(),isEventCapture:1})
+const created=await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({containerTotalNum:1,textObject:[startup]}));if(created!==0)throw new Error(`startup failed ${created}`)
 
-function pcm16RmsDb(pcm: Uint8Array): number {
-  const evenLength = pcm.byteLength - (pcm.byteLength % 2)
-  if (evenLength < 2) return -96
-  const view = new DataView(pcm.buffer, pcm.byteOffset, evenLength)
-  const sampleCount = evenLength / 2
-  let sumSquares = 0
-  for (let offset = 0; offset < evenLength; offset += 2) {
-    const sample = view.getInt16(offset, true) / 32768
-    sumSquares += sample * sample
-  }
-  const rms = Math.sqrt(sumSquares / sampleCount)
-  if (rms <= 0) return -96
-  return Math.max(-96, 20 * Math.log10(rms))
-}
-
-function meter(db: number): string {
-  const normalized = Math.max(0, Math.min(1, (db + 60) / 60))
-  const bars = Math.round(normalized * 10)
-  return `${'|'.repeat(bars)}${'.'.repeat(10 - bars)}`
-}
-
-function screenText(): string {
-  const lines = [
-    'ALYX G2 VOICE 0.1.1',
-    `MIC: ${micState}  press:${pressCount}`,
-    `audioControl: ${audioResult}`,
-    `Last: ${lastAction}`,
-  ]
-  if (micState === 'LIVE') {
-    lines.push(`Voice:${meter(lastDb)} ${lastDb.toFixed(0)}dB`)
-    lines.push(`Frames:${packetCount}`)
-    lines.push('Press=pause  Double=exit')
-  } else if (micState === 'FAILED') {
-    lines.push(lastError ? `Err:${lastError.slice(0, 52)}` : 'Mic request returned false')
-    lines.push('Press retries mic')
-    lines.push('Double=exit')
-  } else {
-    lines.push(`Event:${lastEvent}`)
-    lines.push('Press=start mic')
-    lines.push('No press? auto-test in 3s')
-  }
-  return lines.join('\n')
-}
-
-async function render(): Promise<boolean> {
-  try {
-    const ok = await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({ containerID: MAIN_ID, containerName: MAIN_NAME, content: screenText() }),
-    )
-    if (!ok) console.warn('textContainerUpgrade returned false')
-    return ok
-  } catch (err) {
-    console.error('textContainerUpgrade failed', err)
-    return false
-  }
-}
-
-async function startMic(origin: string): Promise<void> {
-  if (micState === 'STARTING' || micState === 'LIVE' || shuttingDown) return
-  micState = 'STARTING'
-  audioResult = 'n/a'
-  lastError = ''
-  packetCount = 0
-  lastDb = -96
-  lastAction = `${origin}: mic request`
-  await render()
-  try {
-    const ok = await bridge.audioControl(true, AudioInputSource.Glasses)
-    audioResult = ok ? 'true' : 'false'
-    micState = ok ? 'LIVE' : 'FAILED'
-    lastAction = ok ? `${origin}: MIC LIVE` : `${origin}: MIC FAILED`
-    if (!ok) lastError = 'audioControl returned false'
-  } catch (err) {
-    audioResult = 'error'
-    micState = 'FAILED'
-    lastError = err instanceof Error ? err.message : String(err)
-    lastAction = `${origin}: exception`
-  }
-  await render()
-}
-
-async function stopMic(origin: string): Promise<void> {
-  if (micState !== 'LIVE') return
-  try {
-    const ok = await bridge.audioControl(false)
-    lastAction = `${origin}: stop ${ok ? 'OK' : 'false'}`
-  } catch (err) {
-    lastAction = `${origin}: stop error`
-    lastError = err instanceof Error ? err.message : String(err)
-  }
-  micState = 'OFF'
-  audioResult = 'n/a'
-  await render()
-}
-
-async function toggleMic(origin: string): Promise<void> {
-  if (micState === 'LIVE') await stopMic(origin)
-  else await startMic(origin)
-}
-
-async function cleanup(): Promise<void> {
-  if (shuttingDown) return
-  shuttingDown = true
-  try { await bridge.audioControl(false) } catch {}
-  micState = 'OFF'
-}
-
-const startup = new TextContainerProperty({
-  xPosition: 0,
-  yPosition: 0,
-  width: 576,
-  height: 288,
-  borderWidth: 0,
-  borderColor: 5,
-  paddingLength: 6,
-  containerID: MAIN_ID,
-  containerName: MAIN_NAME,
-  content: screenText(),
-  isEventCapture: 1,
+const unsub=bridge.onEvenHubEvent(e=>{
+ const pcm=e.audioEvent?.audioPcm;if(mic&&pcm){frames++;lastDb=db(pcm);if(lastDb>-42)lastVoice=performance.now();if(ws?.readyState===1)ws.send(pcm);if(mode==='wake'&&wakeSeen&&performance.now()-lastVoice>1300){endUtterance();wakeSeen=false}void render()}
+ const s=evt(e.sysEvent),t=evt(e.textEvent)
+ if(s===OsEventTypeList.DOUBLE_CLICK_EVENT||t===OsEventTypeList.DOUBLE_CLICK_EVENT){void stopMic().finally(()=>{unsub();bridge.shutDownPageContainer(1)});return}
+ if(s===OsEventTypeList.CLICK_EVENT||t===OsEventTypeList.CLICK_EVENT){press++;if(mode==='ptt'&&state==='PTT LISTEN'){endUtterance();mode='wake';sendJson({type:'mode',mode:'wake'})}else beginPtt();void render()}
+ if(s===OsEventTypeList.SYSTEM_EXIT_EVENT||s===OsEventTypeList.ABNORMAL_EXIT_EVENT){void stopMic().finally(unsub)}
 })
-
-const created = await bridge.createStartUpPageContainer(
-  new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [startup] }),
-)
-if (created !== 0) throw new Error(`createStartUpPageContainer failed: ${created}`)
-
-const unsubscribe = bridge.onEvenHubEvent((event) => {
-  const pcm = event.audioEvent?.audioPcm
-  if (micState === 'LIVE' && pcm) {
-    packetCount += 1
-    lastDb = pcm16RmsDb(pcm)
-    const now = performance.now()
-    if (now - lastUiUpdate >= UI_THROTTLE_MS) {
-      lastUiUpdate = now
-      void render()
-    }
-  }
-
-  const sysType = eventTypeOf(event.sysEvent)
-  const textType = eventTypeOf(event.textEvent)
-  if (sysType !== null) lastEvent = `sys:${String(event.sysEvent?.eventType ?? 0)}`
-  else if (textType !== null) lastEvent = `text:${String(event.textEvent?.eventType ?? 0)}`
-
-  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    lastAction = 'DOUBLE PRESS RECEIVED'
-    void cleanup().finally(() => { unsubscribe(); bridge.shutDownPageContainer(1) })
-    return
-  }
-  if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
-    void cleanup().finally(unsubscribe)
-    return
-  }
-  if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
-    pressCount += 1
-    lastAction = 'PRESS RECEIVED'
-    void render().then(() => toggleMic('PRESS'))
-  }
-})
-
-window.addEventListener('beforeunload', () => { void cleanup() })
-await render()
-window.setTimeout(() => {
-  if (pressCount === 0 && micState === 'OFF' && !shuttingDown) {
-    lastAction = 'NO PRESS - AUTO TEST'
-    void startMic('AUTO')
-  }
-}, AUTO_FALLBACK_MS)
+window.addEventListener('beforeunload',()=>{ws?.close();void stopMic()})
+connect();await render()
