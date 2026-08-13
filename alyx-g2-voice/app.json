@@ -2,15 +2,13 @@
   "package_id": "com.randy.alyxg2voice",
   "edition": "202601",
   "name": "Alyx G2 Voice",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.12",
   "entrypoint": "index.html",
   "permissions": [
-    {
-      "name": "g2-microphone",
-      "desc": "Uses the Even G2 microphone to test hands-free voice input for Alyx."
-    }
+    {"name":"g2-microphone","desc":"Uses the Even G2 microphone for hands-free Alyx voice commands."},
+    {"name":"network","desc":"Connects securely to the user's private Alyx Voice Bridge.","whitelist":["https://ramurgamefix.com"]}
   ],
   "supported_languages": ["en"]
 }
