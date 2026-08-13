@@ -1,20 +1,6 @@
 {
-  "name": "alyx-g2-voice",
-  "private": true,
-  "version": "0.1.1",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "tsc --noEmit && vite build",
-    "pack": "npm run build && evenhub pack app.json dist -o AlyxG2Voice-0.1.1.ehpk",
-    "preview": "vite --host 0.0.0.0 --port 4173"
-  },
-  "dependencies": {
-    "@evenrealities/even_hub_sdk": "0.0.12"
-  },
-  "devDependencies": {
-    "@evenrealities/evenhub-cli": "0.1.13",
-    "typescript": "^5.9.3",
-    "vite": "^7.3.1"
-  }
+  "name":"alyx-g2-voice","private":true,"version":"0.2.0","type":"module",
+  "scripts":{"dev":"vite --host 0.0.0.0 --port 5173","build":"tsc --noEmit && vite build","pack":"npm run build && evenhub pack app.json dist -o AlyxG2Voice-0.2.0.ehpk"},
+  "dependencies":{"@evenrealities/even_hub_sdk":"0.0.12"},
+  "devDependencies":{"@evenrealities/evenhub-cli":"0.1.13","typescript":"^5.9.3","vite":"^7.3.1"}
 }
