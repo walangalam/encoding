@@ -3,7 +3,7 @@ name: Build Alyx G2 Voice
 on:
   push:
     branches:
-      - build/alyx-g2-voice-0.2.1
+      - build/alyx-g2-voice-0.2.2
 
 jobs:
   build:
@@ -24,12 +24,12 @@ jobs:
       - name: Verify package
         working-directory: alyx-g2-voice
         run: |
-          test -s AlyxG2Voice-0.2.1.ehpk
-          head -c 4 AlyxG2Voice-0.2.1.ehpk | grep -q EHPK
-          sha256sum AlyxG2Voice-0.2.1.ehpk
+          test -s AlyxG2Voice-0.2.2.ehpk
+          head -c 4 AlyxG2Voice-0.2.2.ehpk | grep -q EHPK
+          sha256sum AlyxG2Voice-0.2.2.ehpk
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AlyxG2Voice-0.2.1
-          path: alyx-g2-voice/AlyxG2Voice-0.2.1.ehpk
+          name: AlyxG2Voice-0.2.2
+          path: alyx-g2-voice/AlyxG2Voice-0.2.2.ehpk
           if-no-files-found: error
